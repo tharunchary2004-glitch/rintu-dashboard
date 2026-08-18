@@ -91,7 +91,8 @@ io.on('connection', (socket) => {
     group: client.user.id,
     forceConvert: true,
     // 👇 ADD THIS LINE RIGHT HERE 👇
-    udp: false 
+    udp: false,
+    tcp: true
 });
                     const player = createAudioPlayer();
                     conn.subscribe(player);
