@@ -5,6 +5,7 @@ const socketIo = require('socket.io');
 const path = require('path');
 const { Client } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
+require('opusscript'); // Add this line to load the easy opus encoder
 const { spawn } = require("child_process");
 const youtubedl = require("youtube-dl-exec");
 
