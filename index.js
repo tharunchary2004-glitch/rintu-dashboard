@@ -83,17 +83,16 @@ io.on('connection', (socket) => {
                 const channel = await client.channels.fetch(channelId);
                 if (channel) {
                     const conn = joinVoiceChannel({ 
-    channelId: channel.id, 
-    guildId: channel.guild.id, 
-    adapterCreator: channel.guild.voiceAdapterCreator, 
-    selfMute: false, 
-    selfDeaf: false, 
-    group: client.user.id,
-    forceConvert: true,
-    // 👇 ADD THIS LINE RIGHT HERE 👇
-    udp: false,
-    tcp: true
-});
+                        channelId: channel.id, 
+                        guildId: channel.guild.id, 
+                        adapterCreator: channel.guild.voiceAdapterCreator, 
+                        selfMute: false, 
+                        selfDeaf: false, 
+                        group: client.user.id,
+                        forceConvert: true,
+                        udp: false,
+                        tcp: true
+                    });
                     const player = createAudioPlayer();
                     conn.subscribe(player);
                     connections.set(index, conn);
@@ -111,8 +110,52 @@ io.on('connection', (socket) => {
             socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
             return;
         }
-        socket.emit('log_event', { msg: `🎵 Fetching audio...`, type: 'info' });
+        
         try {
+            // --- DETECT IF IT'S A RAW URL OR YOUTUBE ---
+            const isRawUrl = url.endsWith('.mp3') || url.endsWith('.m4a') || url.endsWith('.mp4') || url.includes('googlevideo.com');
+
+            if (isRawUrl) {
+                socket.emit('log_event', { msg: `🎵 Playing raw URL directly...`, type: 'info' });
+                currentUrl = url;
+                currentTitle = "Raw Audio Stream";
+                socket.emit('song_playing', currentTitle);
+
+                // Play direct raw URL without ytdl-core
+                const rawStream = spawn(ffmpeg, [
+                    "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+                    "-i", url,
+                    "-f", "s16le",
+                    "-ar", "48000",
+                    "-ac", "2",
+                    "pipe:1"
+                ]);
+
+                clients.forEach((client, index) => {
+                    const player = players.get(index);
+                    if (player) {
+                        const resource = createAudioResource(rawStream.stdout, { 
+                            inputType: StreamType.Raw, 
+                            inlineVolume: true 
+                        });
+                        let effectiveVol = currentVolumeMultiplier;
+                        if (pungiMode) effectiveVol = Math.min(pungiIntensity, 200.0);
+                        else if (blastMode) effectiveVol = Math.min(blastVolume, 500.0);
+                        else if (superLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 20, 2000.0);
+                        else if (forceLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 30, 3000.0);
+                        else effectiveVol = Math.min(currentVolumeMultiplier * 2, 200.0);
+                        
+                        resource.volume.setVolume(effectiveVol);
+                        activeResources.set(index, resource);
+                        player.play(resource);
+                    }
+                });
+                socket.emit('log_event', { msg: `✅ Now Playing! (Raw URL)`, type: 'success' });
+                return;
+            }
+
+            // --- IF IT'S YOUTUBE ---
+            socket.emit('log_event', { msg: `🎵 Fetching audio from YouTube...`, type: 'info' });
             const stream = ytdl(url, { 
                 filter: 'audioonly', 
                 quality: 'lowestaudio',
@@ -143,8 +186,7 @@ io.on('connection', (socket) => {
                     player.play(resource);
                 }
             });
-
-            socket.emit('log_event', { msg: `✅ Now Playing!`, type: 'success' });
+            socket.emit('log_event', { msg: `✅ Now Playing! (YouTube)`, type: 'success' });
 
         } catch (err) {
             socket.emit('log_event', { msg: `❌ Error: ${err.message}`, type: 'error' });
