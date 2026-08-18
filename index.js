@@ -152,7 +152,7 @@ io.on('connection', (socket) => {
         }
         socket.emit('log_event', { msg: `🎵 Fetching audio from URL...`, type: 'info' });
         try {
-            const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio' });
+            const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio',format: 'mp3' });
             currentUrl = url;
             currentTitle = "YouTube Audio";
             socket.emit('song_playing', currentTitle);
