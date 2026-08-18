@@ -145,47 +145,47 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('play_song', async (url) => {
-        if (!currentChannelId) {
-            socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
-            return;
-        }
-        socket.emit('log_event', { msg: `🎵 Fetching audio from URL...`, type: 'info' });
-        try {
-            const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio',format: 'mp3' });
-            currentUrl = url;
-            currentTitle = "YouTube Audio";
-            socket.emit('song_playing', currentTitle);
-            
-            currentFFmpegProcess = spawn("ffmpeg", [
-                "-i", "pipe:0",
-                "-f", "s16le",
-                "-ar", "48000",
-                "-ac", "2",
-                "pipe:1"
-            ]);
-            
-            stream.pipe(currentFFmpegProcess.stdin);
+    try {
+    socket.emit('log_event', { msg: `🎵 Fetching audio...`, type: 'info' });
+    
+    // Get the audio stream directly WITHOUT FFmpeg
+    const stream = ytdl(url, { 
+        filter: 'audioonly', 
+        quality: 'lowestaudio',
+        fmt: 'mp3' // Force MP3 format for speed
+    });
 
-            clients.forEach((client, index) => {
-                const player = players.get(index);
-                if (player && currentFFmpegProcess) {
-                    const resource = createAudioResource(currentFFmpegProcess.stdout, { inputType: StreamType.Raw, inlineVolume: true });
-                    let effectiveVol = currentVolumeMultiplier;
-                    if (pungiMode) effectiveVol = Math.min(pungiIntensity, 200.0);
-                    else if (blastMode) effectiveVol = Math.min(blastVolume, 500.0);
-                    else if (superLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 20, 2000.0);
-                    else if (forceLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 30, 3000.0);
-                    else effectiveVol = Math.min(currentVolumeMultiplier * 2, 200.0);
-                    resource.volume.setVolume(effectiveVol);
-                    activeResources.set(index, resource);
-                    player.play(resource);
-                }
+    currentUrl = url;
+    currentTitle = "YouTube Audio";
+    socket.emit('song_playing', currentTitle);
+
+    clients.forEach((client, index) => {
+        const player = players.get(index);
+        if (player) {
+            // Create the audio resource directly from the stream
+            const resource = createAudioResource(stream, { 
+                inputType: StreamType.Arbitrary, 
+                inlineVolume: true 
             });
-
-        } catch (err) {
-            socket.emit('log_event', { msg: `❌ Error: ${err.message}`, type: 'error' });
+            
+            let effectiveVol = currentVolumeMultiplier;
+            if (pungiMode) effectiveVol = Math.min(pungiIntensity, 200.0);
+            else if (blastMode) effectiveVol = Math.min(blastVolume, 500.0);
+            else if (superLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 20, 2000.0);
+            else if (forceLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 30, 3000.0);
+            else effectiveVol = Math.min(currentVolumeMultiplier * 2, 200.0);
+            
+            resource.volume.setVolume(effectiveVol);
+            activeResources.set(index, resource);
+            player.play(resource);
         }
+    });
+
+    socket.emit('log_event', { msg: `✅ Now Playing!`, type: 'success' });
+
+} catch (err) {
+    socket.emit('log_event', { msg: `❌ Error: ${err.message}`, type: 'error' });
+    }
     });
 
     socket.on('cmd', (cmd) => {
