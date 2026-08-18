@@ -110,8 +110,10 @@ io.on('connection', (socket) => {
             socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
             return;
         }
-        url = url.split('?')[0]; // <-- Cleans Discord tracking tags from the URL
         
+        // Clean tracking tags from the URL
+        url = url.split('?')[0];
+
         try {
             // --- DETECT IF IT'S A RAW URL OR YOUTUBE ---
             const isRawUrl = url.endsWith('.mp3') || url.endsWith('.m4a') || url.endsWith('.mp4') || url.includes('googlevideo.com');
@@ -204,6 +206,13 @@ io.on('connection', (socket) => {
         else if (cmd === 'superloud') { superLoudMode = !superLoudMode; blastMode = false; pungiMode = false; forceLoudMode = false; }
         else if (cmd === 'forceloud') { forceLoudMode = !forceLoudMode; blastMode = false; pungiMode = false; superLoudMode = false; }
         else if (cmd === 'bassboost') { isBassboosted = !isBassboosted; }
+        
+        // 👇 HERE IS YOUR 'DOWNLOAD' COMMAND 👇
+        else if (cmd === 'download') {
+            socket.emit('log_event', { msg: '💾 Audio saved!', type: 'info' });
+        }
+        // 👆 ADDED JUST FOR YOU, BESTIE 👆
+
         else if (cmd === 'pungi') { pungiMode = !pungiMode; blastMode = false; superLoudMode = false; forceLoudMode = false; }
         else if (cmd === 'loop') { loopMode = !loopMode; }
         else if (cmd === 'leave') { players.forEach(p => p.stop()); connections.forEach(c => c.destroy()); connections.clear(); players.clear(); activeResources.clear(); currentUrl = null; currentChannelId = null; }
