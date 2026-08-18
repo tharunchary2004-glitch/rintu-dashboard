@@ -6,6 +6,8 @@ const path = require('path');
 const { Client } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
 const ytdl = require('ytdl-core');
+const { spawn } = require("child_process");
+const ffmpeg = require('ffmpeg-static');
 require('opusscript');
 
 const app = express();
@@ -161,7 +163,7 @@ io.on('connection', (socket) => {
         else if (cmd === 'leave') { players.forEach(p => p.stop()); connections.forEach(c => c.destroy()); connections.clear(); players.clear(); activeResources.clear(); currentUrl = null; currentChannelId = null; }
     });
 
-    socket.on('start_bots', () => { if(currentUrl && clients.length > 0) { /* Logic handled by play_song */ } });
+    socket.on('start_bots', () => { /* Logic handled by play_song */ });
     socket.on('stop_bots', () => { players.forEach(p => p.stop()); activeResources.clear(); });
     socket.on('update_volume', (vol) => { currentVolumeMultiplier = vol / 100; });
 });
