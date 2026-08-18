@@ -5,9 +5,17 @@ const socketIo = require('socket.io');
 const path = require('path');
 const { Client } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
-require('opusscript'); // Add this line to load the easy opus encoder
 const { spawn } = require("child_process");
-const youtubedl = require("youtube-dl-exec");
+const ytdl = require('ytdl-core'); // REPLACED youtube-dl-exec with ytdl-core
+require('opusscript');
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+
+app.use(express.static(__dirname));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.use(express.json());
 
 const app = express();
 const server = http.createServer(app);
@@ -145,27 +153,44 @@ io.on('connection', (socket) => {
     });
 
     socket.on('play_song', async (url) => {
-        if (!currentChannelId) {
-            socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
-            return;
-        }
-        socket.emit('log_event', { msg: `🎵 Fetching audio from URL...`, type: 'info' });
-        try {
-            const result = await youtubedl(url, {
-                noPlaylist: true,
-                format: "bestaudio[ext=webm]/bestaudio/best",
-                noWarnings: true,
-                ignoreErrors: true,
-                noCheckCertificates: true
-            });
-            currentUrl = result.url;
-            currentTitle = result.title || "YouTube Audio";
-            socket.emit('song_playing', currentTitle);
-            startFFmpegStream(currentUrl);
-        } catch (err) {
-            socket.emit('log_event', { msg: `❌ Error extracting audio: ${err.message}`, type: 'error' });
-        }
-    });
+    if (!currentChannelId) {
+        socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
+        return;
+    }
+    socket.emit('log_event', { msg: `🎵 Fetching audio from URL...`, type: 'info' });
+    try {
+        // BYPASS: Using ytdl-core (No Python needed!)
+        const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio' });
+        currentUrl = url;
+        currentTitle = "YouTube Audio";
+        socket.emit('song_playing', currentTitle);
+        
+        // Pass the stream directly to FFmpeg
+        currentFFmpegProcess = spawn("ffmpeg", [
+            "-i", "pipe:0",
+            "-f", "s16le",
+            "-ar", "48000",
+            "-ac", "2",
+            "pipe:1"
+        ]);
+        
+        stream.pipe(currentFFmpegProcess.stdin);
+
+        clients.forEach((client, index) => {
+            const player = players.get(index);
+            if (player && currentFFmpegProcess) {
+                const resource = createAudioResource(currentFFmpegProcess.stdout, { inputType: StreamType.Raw, inlineVolume: true });
+                let effectiveVol = currentVolumeMultiplier * 2;
+                resource.volume.setVolume(effectiveVol);
+                activeResources.set(index, resource);
+                player.play(resource);
+            }
+        });
+
+    } catch (err) {
+        socket.emit('log_event', { msg: `❌ Error: ${err.message}`, type: 'error' });
+    }
+});
 
     socket.on('cmd', (cmd) => {
         socket.emit('log_event', { msg: `Command: ${cmd}`, type: 'info' });
