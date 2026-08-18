@@ -110,6 +110,7 @@ io.on('connection', (socket) => {
             socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
             return;
         }
+        url = url.split('?')[0]; // <-- Cleans Discord tracking tags from the URL
         
         try {
             // --- DETECT IF IT'S A RAW URL OR YOUTUBE ---
