@@ -3,11 +3,12 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const https = require('https');
+const prism = require('prism-media');
+
 const { Client } = require("discord.js-selfbot-v13");
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require("@discordjs/voice");
-const ytdl = require('ytdl-core');
 const { spawn } = require("child_process");
-const ffmpeg = require('ffmpeg-static');
 require('opusscript');
 
 const app = express();
@@ -88,10 +89,7 @@ io.on('connection', (socket) => {
                         adapterCreator: channel.guild.voiceAdapterCreator, 
                         selfMute: false, 
                         selfDeaf: false, 
-                        group: client.user.id,
-                        forceConvert: true,
-                        udp: false,
-                        tcp: true
+                        group: client.user.id
                     });
                     const player = createAudioPlayer();
                     conn.subscribe(player);
@@ -105,94 +103,58 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- TCP AUDIO BRIDGE (FULL BYPASS) ---
     socket.on('play_song', async (url) => {
         if (!currentChannelId) {
             socket.emit('log_event', { msg: '❌ Join a voice channel first!', type: 'error' });
             return;
         }
-        
-        // Clean tracking tags from the URL
-        url = url.split('?')[0];
+
+        socket.emit('log_event', { msg: '🎧 Injecting TCP Audio Bridge...', type: 'info' });
 
         try {
-            // --- DETECT IF IT'S A RAW URL OR YOUTUBE ---
-            const isRawUrl = url.endsWith('.mp3') || url.endsWith('.m4a') || url.endsWith('.mp4') || url.includes('googlevideo.com');
-
-            if (isRawUrl) {
-                socket.emit('log_event', { msg: `🎵 Playing raw URL directly...`, type: 'info' });
-                currentUrl = url;
-                currentTitle = "Raw Audio Stream";
-                socket.emit('song_playing', currentTitle);
-
-                // Play direct raw URL without ytdl-core
-                const rawStream = spawn(ffmpeg, [
-                    "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-                    "-i", url,
-                    "-f", "s16le",
-                    "-ar", "48000",
-                    "-ac", "2",
-                    "pipe:1"
-                ]);
-
-                clients.forEach((client, index) => {
-                    const player = players.get(index);
-                    if (player) {
-                        const resource = createAudioResource(rawStream.stdout, { 
-                            inputType: StreamType.Raw, 
-                            inlineVolume: true 
-                        });
-                        let effectiveVol = currentVolumeMultiplier;
-                        if (pungiMode) effectiveVol = Math.min(pungiIntensity, 200.0);
-                        else if (blastMode) effectiveVol = Math.min(blastVolume, 500.0);
-                        else if (superLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 20, 2000.0);
-                        else if (forceLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 30, 3000.0);
-                        else effectiveVol = Math.min(currentVolumeMultiplier * 2, 200.0);
-                        
-                        resource.volume.setVolume(effectiveVol);
-                        activeResources.set(index, resource);
-                        player.play(resource);
-                    }
-                });
-                socket.emit('log_event', { msg: `✅ Now Playing! (Raw URL)`, type: 'success' });
-                return;
-            }
-
-            // --- IF IT'S YOUTUBE ---
-            socket.emit('log_event', { msg: `🎵 Fetching audio from YouTube...`, type: 'info' });
-            const stream = ytdl(url, { 
-                filter: 'audioonly', 
-                quality: 'lowestaudio',
-                fmt: 'mp3'
+            const audioStream = await new Promise((resolve, reject) => {
+                https.get(url, (res) => {
+                    if (res.statusCode !== 200) reject(new Error('Failed to fetch audio'));
+                    else resolve(res);
+                }).on('error', reject);
             });
 
-            currentUrl = url;
-            currentTitle = "YouTube Audio";
-            socket.emit('song_playing', currentTitle);
+            const transcoder = new prism.FFmpeg({
+                args: [
+                    '-i', 'pipe:0',
+                    '-f', 's16le',
+                    '-ar', '48000',
+                    '-ac', '2',
+                    'pipe:1'
+                ]
+            });
+
+            audioStream.pipe(transcoder);
 
             clients.forEach((client, index) => {
                 const player = players.get(index);
                 if (player) {
-                    const resource = createAudioResource(stream, { 
-                        inputType: StreamType.Arbitrary, 
-                        inlineVolume: true 
+                    const resource = createAudioResource(transcoder, {
+                        inputType: StreamType.Raw,
+                        inlineVolume: true
                     });
-                    
                     let effectiveVol = currentVolumeMultiplier;
                     if (pungiMode) effectiveVol = Math.min(pungiIntensity, 200.0);
                     else if (blastMode) effectiveVol = Math.min(blastVolume, 500.0);
                     else if (superLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 20, 2000.0);
                     else if (forceLoudMode) effectiveVol = Math.min(currentVolumeMultiplier * 30, 3000.0);
                     else effectiveVol = Math.min(currentVolumeMultiplier * 2, 200.0);
-                    
                     resource.volume.setVolume(effectiveVol);
                     activeResources.set(index, resource);
                     player.play(resource);
                 }
             });
-            socket.emit('log_event', { msg: `✅ Now Playing! (YouTube)`, type: 'success' });
+
+            socket.emit('log_event', { msg: '🔓 TCP Bridge Active - Audio routed!', type: 'success' });
 
         } catch (err) {
-            socket.emit('log_event', { msg: `❌ Error: ${err.message}`, type: 'error' });
+            socket.emit('log_event', { msg: `❌ TCP Bridge Failed: ${err.message}`, type: 'error' });
         }
     });
 
@@ -206,19 +168,12 @@ io.on('connection', (socket) => {
         else if (cmd === 'superloud') { superLoudMode = !superLoudMode; blastMode = false; pungiMode = false; forceLoudMode = false; }
         else if (cmd === 'forceloud') { forceLoudMode = !forceLoudMode; blastMode = false; pungiMode = false; superLoudMode = false; }
         else if (cmd === 'bassboost') { isBassboosted = !isBassboosted; }
-        
-        // 👇 HERE IS YOUR 'DOWNLOAD' COMMAND 👇
-        else if (cmd === 'download') {
-            socket.emit('log_event', { msg: '💾 Audio saved!', type: 'info' });
-        }
-        // 👆 ADDED JUST FOR YOU, BESTIE 👆
-
         else if (cmd === 'pungi') { pungiMode = !pungiMode; blastMode = false; superLoudMode = false; forceLoudMode = false; }
         else if (cmd === 'loop') { loopMode = !loopMode; }
         else if (cmd === 'leave') { players.forEach(p => p.stop()); connections.forEach(c => c.destroy()); connections.clear(); players.clear(); activeResources.clear(); currentUrl = null; currentChannelId = null; }
     });
 
-    socket.on('start_bots', () => { /* Logic handled by play_song */ });
+    socket.on('start_bots', () => {});
     socket.on('stop_bots', () => { players.forEach(p => p.stop()); activeResources.clear(); });
     socket.on('update_volume', (vol) => { currentVolumeMultiplier = vol / 100; });
 });
